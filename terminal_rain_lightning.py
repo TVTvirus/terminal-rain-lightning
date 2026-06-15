@@ -10,6 +10,10 @@ import pkgutil
 import shutil
 import subprocess
 import tempfile
+import locale
+import threading
+import urllib.request
+import urllib.parse
 
 UPDATE_INTERVAL = 0.015 # Fast update interval
 MEDIUM_MOTION_INTERVAL = 0.045 # Middle update interval
@@ -386,6 +390,131 @@ class LightningBolt:
                 pass
 
 
+# ════════════════════════════════════════════════════════════════
+#  FORK (ojo): temperatura grande + clima REAL de Esparza, Costa Rica
+#  Sondea wttr.in en un hilo aparte (no bloquea el render de curses)
+#  y dibuja los °C centrados por encima de la lluvia. La intensidad
+#  de la lluvia y el modo tormenta se derivan del clima real.
+# ════════════════════════════════════════════════════════════════
+COLOR_PAIR_TEMP = 5
+
+BIG_FONT = {
+    '0': ["███", "█ █", "█ █", "█ █", "███"],
+    '1': [" ██", "  █", "  █", "  █", "  █"],
+    '2': ["███", "  █", "███", "█  ", "███"],
+    '3': ["███", "  █", "███", "  █", "███"],
+    '4': ["█ █", "█ █", "███", "  █", "  █"],
+    '5': ["███", "█  ", "███", "  █", "███"],
+    '6': ["███", "█  ", "███", "█ █", "███"],
+    '7': ["███", "  █", "  █", "  █", "  █"],
+    '8': ["███", "█ █", "███", "█ █", "███"],
+    '9': ["███", "█ █", "███", "  █", "███"],
+    '-': ["   ", "   ", "███", "   ", "   "],
+    'C': ["███", "█  ", "█  ", "█  ", "███"],
+}
+DEGREE = ["▛▜", "▙▟", "  ", "  ", "  "]
+
+
+def build_temp_block(temp_str):
+    """5 líneas con la temperatura en grande + símbolo de grados + C."""
+    rows = ["", "", "", "", ""]
+    for ch in temp_str:
+        glyph = BIG_FONT.get(ch)
+        if glyph is None:
+            for r in range(5):
+                rows[r] += "    "
+            continue
+        for r in range(5):
+            rows[r] += glyph[r] + " "
+    for r in range(5):
+        rows[r] += DEGREE[r] + " " + BIG_FONT['C'][r]
+    return rows
+
+
+class Weather:
+    """Sondea wttr.in en segundo plano; el render solo lee el último valor."""
+    KEYWORDS = [
+        ('storm', ('thunder', 'storm')),
+        ('rain',  ('rain', 'drizzle', 'shower', 'sleet', 'snow')),
+        ('cloud', ('cloud', 'overcast', 'fog', 'mist', 'haze')),
+        ('sun',   ('sun', 'clear')),
+    ]
+
+    def __init__(self, location):
+        self.location = location
+        self.temp = None
+        self.cond = "…"
+        self.kind = "rain"
+        self.lock = threading.Lock()
+
+    def start(self):
+        threading.Thread(target=self._loop, daemon=True).start()
+
+    def _loop(self):
+        while True:
+            self._fetch()
+            time.sleep(600)  # refresca cada 10 min
+
+    def _fetch(self):
+        # modo prueba/offline: OJO_CLIMA_TEMP / OJO_CLIMA_COND
+        env_t = os.environ.get('OJO_CLIMA_TEMP')
+        if env_t:
+            self._set(env_t, os.environ.get('OJO_CLIMA_COND', 'prueba'))
+            return
+        try:
+            url = "https://wttr.in/" + urllib.parse.quote(self.location) + "?format=%t|%C"
+            req = urllib.request.Request(url, headers={'User-Agent': 'curl/8.0'})
+            raw = urllib.request.urlopen(req, timeout=6).read().decode('utf-8', 'ignore').strip()
+            if '|' in raw and len(raw) < 120:
+                t, c = raw.split('|', 1)
+                self._set(t, c.strip())
+        except Exception:
+            pass
+
+    def _set(self, temp_raw, cond):
+        digits = ''.join(ch for ch in temp_raw if ch.isdigit() or ch == '-')
+        cl = cond.lower()
+        kind = 'cloud'
+        for k, words in self.KEYWORDS:
+            if any(w in cl for w in words):
+                kind = k
+                break
+        with self.lock:
+            self.temp = digits or None
+            self.cond = cond
+            self.kind = kind
+
+    def get(self):
+        with self.lock:
+            return self.temp, self.cond, self.kind
+
+
+def draw_temperature(stdscr, weather):
+    """Dibuja los °C grandes + etiqueta, centrados y por encima de la lluvia."""
+    temp, cond, _ = weather.get()
+    rows, cols = stdscr.getmaxyx()
+    block = build_temp_block(temp if temp else "--")
+    width = max(len(line) for line in block)
+    start_y = max(0, rows // 2 - 3)
+    start_x = max(0, (cols - width) // 2)
+    attr = curses.color_pair(COLOR_PAIR_TEMP) | curses.A_BOLD
+    for i, line in enumerate(block):
+        y = start_y + i
+        if 0 <= y < rows:
+            try:
+                stdscr.addstr(y, start_x, line[:max(0, cols - start_x - 1)], attr)
+            except curses.error:
+                pass
+    label = "Esparza · " + (cond or "")
+    ly, lx = start_y + 6, max(0, (cols - len(label)) // 2)
+    if 0 <= ly < rows:
+        try:
+            stdscr.addstr(ly, lx, label[:max(0, cols - lx - 1)],
+                          curses.color_pair(COLOR_PAIR_RAIN_NORMAL))
+        except curses.error:
+            pass
+
+
 def setup_colors(rain_color_str='cyan', lightning_color_str='yellow'):
     """Initializes color pairs for the rain and lightning based on input strings."""
     global LIGHTNING_COLOR_ATTR
@@ -406,6 +535,7 @@ def setup_colors(rain_color_str='cyan', lightning_color_str='yellow'):
         # curses.init_pair(COLOR_PAIR_RAIN_SPLASH, curses.COLOR_BLUE, bg) # Removed
         # curses.init_pair(COLOR_PAIR_CLOUD, curses.COLOR_WHITE, bg) # Removed
         curses.init_pair(COLOR_PAIR_LIGHTNING, lightning_fg, bg)
+        curses.init_pair(COLOR_PAIR_TEMP, curses.COLOR_WHITE, bg)  # fork: °C
         LIGHTNING_COLOR_ATTR = curses.color_pair(COLOR_PAIR_LIGHTNING) | curses.A_BOLD
 
         return True
@@ -421,10 +551,11 @@ def setup_colors(rain_color_str='cyan', lightning_color_str='yellow'):
         # curses.init_pair(COLOR_PAIR_RAIN_SPLASH, curses.COLOR_WHITE, curses.COLOR_BLACK) # Removed
         # curses.init_pair(COLOR_PAIR_CLOUD, curses.COLOR_WHITE, curses.COLOR_BLACK) # Removed
         curses.init_pair(COLOR_PAIR_LIGHTNING, curses.COLOR_WHITE, curses.COLOR_BLACK)
+        curses.init_pair(COLOR_PAIR_TEMP, curses.COLOR_WHITE, curses.COLOR_BLACK)  # fork: °C
         LIGHTNING_COLOR_ATTR = curses.color_pair(COLOR_PAIR_LIGHTNING) | curses.A_BOLD
         return False
 
-def simulate_rain(stdscr, rain_color_str='cyan', lightning_color_str='yellow', start_with_thunderstorm=False, start_speed='fast', sound_manager=None):
+def simulate_rain(stdscr, rain_color_str='cyan', lightning_color_str='yellow', start_with_thunderstorm=False, start_speed='fast', sound_manager=None, weather=None):
     """Main curses visualization loop for rain simulation."""
     curses.curs_set(0) # Hide cursor
     stdscr.nodelay(True) # Non-blocking input
@@ -438,6 +569,11 @@ def simulate_rain(stdscr, rain_color_str='cyan', lightning_color_str='yellow', s
     speed_mode_index = SPEED_MODE_NAMES.index(start_speed) if start_speed in SPEED_MODE_NAMES else 0
     if sound_manager:
         sound_manager.start()
+    if weather:
+        weather.start()
+
+    # factor de lluvia según el clima real (sun=despejado … storm=diluvio)
+    RAIN_FACTOR = {'sun': 0.0, 'cloud': 0.25, 'rain': 1.0, 'storm': 1.4}
 
     last_update_time = time.time()
 
@@ -476,6 +612,13 @@ def simulate_rain(stdscr, rain_color_str='cyan', lightning_color_str='yellow', s
         if sound_manager:
             sound_manager.update()
 
+        # fork: el clima real de Esparza manda sobre tormenta e intensidad
+        rain_factor = 1.0
+        if weather:
+            _, _, kind = weather.get()
+            is_thunderstorm = (kind == 'storm')
+            rain_factor = RAIN_FACTOR.get(kind, 1.0)
+
         # 1. Lightning Bolts
         next_bolts = []
         if rows >= 4 and is_thunderstorm and len(active_bolts) < 3 and random.random() < LIGHTNING_CHANCE:
@@ -491,12 +634,13 @@ def simulate_rain(stdscr, rain_color_str='cyan', lightning_color_str='yellow', s
         active_bolts = next_bolts
 
         # 2. Raindrops (generation and update)
-        generation_chance = 0.5 if is_thunderstorm else 0.3
-        max_new_drops = cols // 8 if is_thunderstorm else cols // 15
+        generation_chance = (0.5 if is_thunderstorm else 0.3) * rain_factor
+        base_max = cols // 8 if is_thunderstorm else cols // 15
+        max_new_drops = max(0, int(base_max * rain_factor))
         min_speed = 0.3 if is_thunderstorm else 0.3
         max_speed = 1.0 if is_thunderstorm else 0.6
 
-        if random.random() < generation_chance:
+        if rain_factor > 0 and max_new_drops > 0 and random.random() < generation_chance:
             num_new_drops = random.randint(1, max(1, max_new_drops))
             for _ in range(num_new_drops):
                  x = random.randint(0, cols - 1)
@@ -536,7 +680,11 @@ def simulate_rain(stdscr, rain_color_str='cyan', lightning_color_str='yellow', s
                     stdscr.addstr(int(drop.y), drop.x, drop.char, attr)
              except curses.error:
                  pass
-                
+
+        # 3. fork: temperatura grande de Esparza, por encima de la lluvia
+        if weather:
+            draw_temperature(stdscr, weather)
+
         stdscr.noutrefresh()
         curses.doupdate()
 
@@ -583,6 +731,17 @@ def main():
         choices=VOLUME_PRESET_NAMES,
         help=f"Rain and thunder volume preset. Default: normal. Choices: {', '.join(VOLUME_PRESET_NAMES)}"
     )
+    parser.add_argument(
+        '--location',
+        type=str,
+        default='Esparza,Puntarenas,Costa Rica',
+        help="Ubicación para el clima real (wttr.in). Default: Esparza, Costa Rica."
+    )
+    parser.add_argument(
+        '--no-temp',
+        action='store_true',
+        help="No mostrar la temperatura (lluvia decorativa pura)."
+    )
     args = parser.parse_args()
     # ------------------------ #
 
@@ -590,12 +749,19 @@ def main():
         print("Error: This script requires a TTY with curses support.")
         return
 
+    # locale para que curses dibuje bien los glifos Unicode del °C (█ ▛▜ …)
+    try:
+        locale.setlocale(locale.LC_ALL, '')
+    except locale.Error:
+        pass
+
     sound_manager = SoundManager(enabled=args.sound, volume_preset=args.volume)
     atexit.register(sound_manager.close)
+    weather = None if args.no_temp else Weather(args.location)
 
     try:
         # Pass parsed colors to the main simulation function
-        curses.wrapper(simulate_rain, args.rain_color, args.lightning_color, args.thunder, args.speed, sound_manager)
+        curses.wrapper(simulate_rain, args.rain_color, args.lightning_color, args.thunder, args.speed, sound_manager, weather)
     except curses.error as e:
         try: curses.endwin()
         except Exception: pass
