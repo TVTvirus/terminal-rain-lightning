@@ -447,6 +447,9 @@ class Weather:
         self.temp = None
         self.cond = "…"
         self.kind = "rain"
+        self.feels = None
+        self.humidity = ""
+        self.wind = ""
         self.lock = threading.Lock()
 
     def start(self):
@@ -464,17 +467,23 @@ class Weather:
             self._set(env_t, os.environ.get('OJO_CLIMA_COND', 'prueba'))
             return
         try:
-            url = "https://wttr.in/" + urllib.parse.quote(self.location) + "?format=%t|%C&lang=es"
+            url = ("https://wttr.in/" + urllib.parse.quote(self.location) +
+                   "?format=%t|%C|%f|%h|%w&lang=es")
             req = urllib.request.Request(url, headers={'User-Agent': 'curl/8.0'})
             raw = urllib.request.urlopen(req, timeout=6).read().decode('utf-8', 'ignore').strip()
-            if '|' in raw and len(raw) < 120:
-                t, c = raw.split('|', 1)
-                self._set(t, c.strip())
+            if '|' in raw and len(raw) < 200:
+                parts = [p.strip() for p in raw.split('|')]
+                while len(parts) < 5:
+                    parts.append('')
+                self._set(parts[0], parts[1], parts[2], parts[3], parts[4])
         except Exception:
             pass
 
-    def _set(self, temp_raw, cond):
-        digits = ''.join(ch for ch in temp_raw if ch.isdigit() or ch == '-')
+    @staticmethod
+    def _num(s):
+        return ''.join(ch for ch in s if ch.isdigit() or ch == '-')
+
+    def _set(self, temp_raw, cond, feels='', humidity='', wind=''):
         cl = cond.lower()
         kind = 'cloud'
         for k, words in self.KEYWORDS:
@@ -482,13 +491,20 @@ class Weather:
                 kind = k
                 break
         with self.lock:
-            self.temp = digits or None
+            self.temp = self._num(temp_raw) or None
             self.cond = cond
+            self.feels = self._num(feels) or None
+            self.humidity = humidity
+            self.wind = wind
             self.kind = kind
 
     def get(self):
         with self.lock:
             return self.temp, self.cond, self.kind
+
+    def get_extra(self):
+        with self.lock:
+            return self.feels, self.humidity, self.wind
 
 
 def draw_temperature(stdscr, weather):
@@ -515,6 +531,25 @@ def draw_temperature(stdscr, weather):
                           curses.color_pair(COLOR_PAIR_RAIN_NORMAL))
         except curses.error:
             pass
+
+    # línea extra: sensación · humedad · viento
+    feels, humidity, wind = weather.get_extra()
+    bits = []
+    if feels:
+        bits.append("Sensación " + feels + "°")
+    if humidity:
+        bits.append("Hum " + humidity)
+    if wind:
+        bits.append(wind)
+    if bits:
+        extra = "  ·  ".join(bits)
+        ey, ex = ly + 1, max(0, (cols - len(extra)) // 2)
+        if 0 <= ey < rows:
+            try:
+                stdscr.addstr(ey, ex, extra[:max(0, cols - ex - 1)],
+                              curses.color_pair(COLOR_PAIR_RAIN_NORMAL) | curses.A_DIM)
+            except curses.error:
+                pass
 
 
 def setup_colors(rain_color_str='cyan', lightning_color_str='yellow'):
