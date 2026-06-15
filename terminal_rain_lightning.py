@@ -434,10 +434,12 @@ def build_temp_block(temp_str):
 class Weather:
     """Sondea wttr.in en segundo plano; el render solo lee el último valor."""
     KEYWORDS = [
-        ('storm', ('thunder', 'storm')),
-        ('rain',  ('rain', 'drizzle', 'shower', 'sleet', 'snow')),
-        ('cloud', ('cloud', 'overcast', 'fog', 'mist', 'haze')),
-        ('sun',   ('sun', 'clear')),
+        ('storm', ('thunder', 'storm', 'tormenta', 'eléctric', 'truen')),
+        ('rain',  ('rain', 'drizzle', 'shower', 'sleet', 'snow',
+                   'lluvia', 'llovizna', 'aguacero', 'chubasc', 'chaparr', 'nieve', 'aguaniev')),
+        ('cloud', ('cloud', 'overcast', 'fog', 'mist', 'haze',
+                   'nub', 'cubierto', 'niebla', 'neblina', 'bruma')),
+        ('sun',   ('sun', 'clear', 'sol', 'despejado', 'claro')),
     ]
 
     def __init__(self, location):
@@ -462,7 +464,7 @@ class Weather:
             self._set(env_t, os.environ.get('OJO_CLIMA_COND', 'prueba'))
             return
         try:
-            url = "https://wttr.in/" + urllib.parse.quote(self.location) + "?format=%t|%C"
+            url = "https://wttr.in/" + urllib.parse.quote(self.location) + "?format=%t|%C&lang=es"
             req = urllib.request.Request(url, headers={'User-Agent': 'curl/8.0'})
             raw = urllib.request.urlopen(req, timeout=6).read().decode('utf-8', 'ignore').strip()
             if '|' in raw and len(raw) < 120:
