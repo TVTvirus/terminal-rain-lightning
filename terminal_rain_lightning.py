@@ -391,10 +391,10 @@ class LightningBolt:
 
 
 # ════════════════════════════════════════════════════════════════
-#  FORK (ojo): temperatura grande + clima REAL de Esparza, Costa Rica
-#  Sondea wttr.in en un hilo aparte (no bloquea el render de curses)
-#  y dibuja los °C centrados por encima de la lluvia. La intensidad
-#  de la lluvia y el modo tormenta se derivan del clima real.
+#  FORK: big temperature readout + REAL weather (Open-Meteo, no API key)
+#  Polls in a background thread (never blocks the curses render) and
+#  draws the °C centered above the rain. The scene, rain intensity and
+#  thunderstorm mode are all derived from the real WMO weather code.
 # ════════════════════════════════════════════════════════════════
 COLOR_PAIR_TEMP = 5
 
@@ -414,7 +414,7 @@ BIG_FONT = {
 }
 DEGREE = ["▛▜", "▙▟", "  ", "  ", "  "]
 
-# --- fork: escenografía por estado (sol / nubes / niebla) ---
+# --- fork: scenery per weather state (sun / clouds / fog) ---
 COLOR_PAIR_SUN = 6
 COLOR_PAIR_CLOUD = 7
 COLOR_PAIR_STORM_ACC = 8
@@ -444,7 +444,7 @@ CLOUD_SHAPES = [
 
 
 def draw_sun(stdscr, rows, cols):
-    """Sol con rayos que pulsan, arriba a la izquierda (no pisa los °C)."""
+    """Sun with pulsing rays, top-left (never overlaps the °C block)."""
     frame = SUN_FRAMES[int(time.time() * 1.6) % len(SUN_FRAMES)]
     sy = max(1, rows // 5 - 1)
     sx = max(1, cols // 5 - len(frame[0]) // 2)
@@ -459,12 +459,12 @@ def draw_sun(stdscr, rows, cols):
 
 
 def make_clouds(rows, cols):
-    """3 nubes a alturas y velocidades distintas (parallax). La posición se
-    deriva del reloj → no hay estado que actualizar frame a frame."""
-    # dos arriba y una abajo del bloque de °C (si pasa por detrás, los huecos
-    # del glifo la trocean y parece un dígito roto)
+    """3 clouds at different heights and speeds (parallax). Position derives
+    from the clock → no per-frame state to update."""
+    # two above and one below the °C block (if a cloud passes behind it, the
+    # glyph's gaps slice it up and it reads like a broken digit)
     ys = [1, max(3, rows // 4), max(7, (rows * 3) // 4 + 2)]
-    speeds = [3.2, 1.6, 2.3]  # columnas/seg, misma dirección = viento
+    speeds = [3.2, 1.6, 2.3]  # columns/sec, same direction = wind
     clouds = []
     for i in range(3):
         clouds.append({
@@ -490,8 +490,8 @@ def draw_clouds(stdscr, clouds, rows, cols):
             y = cloud['y'] + i
             if not (0 <= y < rows):
                 continue
-            start = max(0, -x)                 # recorte al entrar por la izquierda
-            end = min(len(line), cols - 1 - x)  # y al salir por la derecha
+            start = max(0, -x)                 # clip while entering from the left
+            end = min(len(line), cols - 1 - x)  # and while leaving on the right
             if start >= end:
                 continue
             try:
@@ -501,8 +501,8 @@ def draw_clouds(stdscr, clouds, rows, cols):
 
 
 def make_fog_bands(rows, cols):
-    """Bandas de niebla: patrón grumoso precalculado (paseo aleatorio de
-    densidad) que luego solo se desplaza; cada banda con rumbo y ritmo propios."""
+    """Fog banks: precomputed clumpy pattern (random walk over density) that
+    then just scrolls; each bank drifts with its own direction and pace."""
     bands = []
     length = max(160, cols * 2)
     for y in range(2, max(3, rows - 2), 3):
@@ -540,7 +540,7 @@ def draw_fog(stdscr, bands, rows, cols):
 
 
 def build_temp_block(temp_str):
-    """5 líneas con la temperatura en grande + símbolo de grados + C."""
+    """5 lines with the temperature in a big block font + degree symbol + C."""
     rows = ["", "", "", "", ""]
     for ch in temp_str:
         glyph = BIG_FONT.get(ch)
@@ -556,7 +556,47 @@ def build_temp_block(temp_str):
 
 
 class Weather:
-    """Sondea wttr.in en segundo plano; el render solo lee el último valor."""
+    """Polls Open-Meteo in a background thread; the render just reads the latest value.
+
+    Open-Meteo backend (formerly wttr.in): no API key, 15-minute model step,
+    and none of wttr's ~1h caching that kept reporting "Sunny" during a downpour.
+    Needs lat/lon, resolved once via geocoding (if --location is given) or by
+    IP (ipapi.co). The state comes from the WMO weather code, not text parsing."""
+
+    # WMO code → (state, english text, spanish text)
+    WMO = {
+        0: ('sun', 'Clear', 'Despejado'),
+        1: ('sun', 'Mainly clear', 'Mayormente despejado'),
+        2: ('cloud', 'Partly cloudy', 'Parcialmente nublado'),
+        3: ('cloud', 'Overcast', 'Cubierto'),
+        45: ('fog', 'Fog', 'Niebla'),
+        48: ('fog', 'Rime fog', 'Niebla escarchada'),
+        51: ('rain', 'Light drizzle', 'Llovizna leve'),
+        53: ('rain', 'Drizzle', 'Llovizna'),
+        55: ('rain', 'Dense drizzle', 'Llovizna densa'),
+        56: ('rain', 'Freezing drizzle', 'Llovizna helada'),
+        57: ('rain', 'Freezing drizzle', 'Llovizna helada'),
+        61: ('rain', 'Light rain', 'Lluvia leve'),
+        63: ('rain', 'Rain', 'Lluvia'),
+        65: ('rain', 'Heavy rain', 'Lluvia fuerte'),
+        66: ('rain', 'Freezing rain', 'Lluvia helada'),
+        67: ('rain', 'Freezing rain', 'Lluvia helada'),
+        71: ('rain', 'Light snow', 'Nieve leve'),
+        73: ('rain', 'Snow', 'Nieve'),
+        75: ('rain', 'Heavy snow', 'Nieve fuerte'),
+        77: ('rain', 'Snow grains', 'Cinarra'),
+        80: ('rain', 'Light showers', 'Chubascos leves'),
+        81: ('rain', 'Showers', 'Chubascos'),
+        82: ('rain', 'Heavy showers', 'Chubascos fuertes'),
+        85: ('rain', 'Snow showers', 'Chubascos de nieve'),
+        86: ('rain', 'Snow showers', 'Chubascos de nieve'),
+        95: ('storm', 'Thunderstorm', 'Tormenta'),
+        96: ('storm', 'Thunderstorm with hail', 'Tormenta con granizo'),
+        99: ('storm', 'Thunderstorm with hail', 'Tormenta con granizo'),
+    }
+    ARROWS = "↑↗→↘↓↙←↖"  # where the wind blows TO (N, NE, …)
+
+    # only for the env-forced test mode (free text → state)
     KEYWORDS = [
         ('storm', ('thunder', 'storm', 'tormenta', 'eléctric', 'truen')),
         ('rain',  ('rain', 'drizzle', 'shower', 'sleet', 'snow',
@@ -575,9 +615,11 @@ class Weather:
         self.feels = None
         self.humidity = ""
         self.wind = ""
-        # etiqueta del lugar: si el usuario dio ubicación, su primer tramo;
-        # si no, se rellena con el %l que detecta wttr.in por IP
+        # place label: first segment of the user's location if given;
+        # otherwise filled in with the city detected by IP geolocation
         self.place = location.split(',')[0].strip() if location else ""
+        self.lat = None
+        self.lon = None
         self.lock = threading.Lock()
 
     def start(self):
@@ -588,23 +630,75 @@ class Weather:
             self._fetch()
             time.sleep(600)  # refresca cada 10 min
 
+    @staticmethod
+    def _get_json(url):
+        req = urllib.request.Request(url, headers={'User-Agent': 'curl/8.0'})
+        raw = urllib.request.urlopen(req, timeout=8).read().decode('utf-8', 'ignore')
+        import json
+        return json.loads(raw)
+
+    def _resolve(self):
+        """Resolves lat/lon once: geocoding if --location was given, IP otherwise."""
+        try:
+            if self.location:
+                parts = [p.strip() for p in self.location.split(',') if p.strip()]
+                url = ("https://geocoding-api.open-meteo.com/v1/search?name=" +
+                       urllib.parse.quote(parts[0]) + "&count=10&language=" +
+                       urllib.parse.quote(self.lang))
+                results = self._get_json(url).get('results') or []
+                if not results:
+                    return
+                best = results[0]
+                # tie-break with the extra segments ("Esparza,Puntarenas,Costa Rica")
+                hints = [p.casefold() for p in parts[1:]]
+                if hints:
+                    for r in results:
+                        region = (r.get('admin1', '') + ' ' + r.get('country', '')).casefold()
+                        if all(h in region for h in hints):
+                            best = r
+                            break
+                self.lat, self.lon = best['latitude'], best['longitude']
+                with self.lock:
+                    if not self.place:
+                        self.place = best.get('name', '')
+            else:
+                d = self._get_json("https://ipapi.co/json/")
+                self.lat, self.lon = d['latitude'], d['longitude']
+                with self.lock:
+                    if not self.place:
+                        self.place = d.get('city', '')
+        except Exception:
+            pass
+
     def _fetch(self):
-        # modo prueba/offline: OJO_CLIMA_TEMP / OJO_CLIMA_COND
+        # test/offline mode: OJO_CLIMA_TEMP / OJO_CLIMA_COND
         env_t = os.environ.get('OJO_CLIMA_TEMP')
         if env_t:
             self._set(env_t, os.environ.get('OJO_CLIMA_COND', 'prueba'))
             return
+        if self.lat is None:
+            self._resolve()
+            if self.lat is None:
+                return
         try:
-            # sin ubicación, wttr.in auto-detecta por IP; %l = lugar resuelto
-            url = ("https://wttr.in/" + urllib.parse.quote(self.location) +
-                   "?format=%t|%C|%f|%h|%w|%l&lang=" + urllib.parse.quote(self.lang))
-            req = urllib.request.Request(url, headers={'User-Agent': 'curl/8.0'})
-            raw = urllib.request.urlopen(req, timeout=6).read().decode('utf-8', 'ignore').strip()
-            if '|' in raw and len(raw) < 300:
-                parts = [p.strip() for p in raw.split('|')]
-                while len(parts) < 6:
-                    parts.append('')
-                self._set(parts[0], parts[1], parts[2], parts[3], parts[4], parts[5])
+            url = ("https://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s"
+                   "&current=temperature_2m,apparent_temperature,relative_humidity_2m,"
+                   "wind_speed_10m,wind_direction_10m,weather_code&timezone=auto"
+                   % (self.lat, self.lon))
+            cur = self._get_json(url)['current']
+            kind, cond_en, cond_es = self.WMO.get(int(cur['weather_code']),
+                                                  ('cloud', 'Cloudy', 'Nublado'))
+            # wind_direction_10m is where the wind comes FROM; the arrow points TO
+            blowing_to = (float(cur.get('wind_direction_10m', 0)) + 180) % 360
+            arrow = self.ARROWS[int((blowing_to + 22.5) // 45) % 8]
+            self._set(
+                str(round(cur['temperature_2m'])),
+                cond_es if self.lang.startswith('es') else cond_en,
+                kind=kind,
+                feels=str(round(cur['apparent_temperature'])),
+                humidity=str(round(cur.get('relative_humidity_2m', 0))) + '%',
+                wind=arrow + str(round(cur.get('wind_speed_10m', 0))) + 'km/h',
+            )
         except Exception:
             pass
 
@@ -612,13 +706,14 @@ class Weather:
     def _num(s):
         return ''.join(ch for ch in s if ch.isdigit() or ch == '-')
 
-    def _set(self, temp_raw, cond, feels='', humidity='', wind='', place=''):
-        cl = cond.lower()
-        kind = 'cloud'
-        for k, words in self.KEYWORDS:
-            if any(w in cl for w in words):
-                kind = k
-                break
+    def _set(self, temp_raw, cond, kind=None, feels='', humidity='', wind='', place=''):
+        if kind is None:  # no WMO code (forced mode): classify by text
+            cl = cond.lower()
+            kind = 'cloud'
+            for k, words in self.KEYWORDS:
+                if any(w in cl for w in words):
+                    kind = k
+                    break
         with self.lock:
             self.temp = self._num(temp_raw) or None
             self.cond = cond
@@ -643,14 +738,14 @@ class Weather:
 
 
 def draw_temperature(stdscr, weather):
-    """Dibuja los °C grandes + etiqueta, centrados y por encima de la lluvia."""
+    """Draws the big °C + label, centered and above the rain."""
     temp, cond, kind = weather.get()
     rows, cols = stdscr.getmaxyx()
     block = build_temp_block(temp if temp else "--")
     width = max(len(line) for line in block)
     start_y = max(0, rows // 2 - 3)
     start_x = max(0, (cols - width) // 2)
-    # acento por estado (como el fallback bash: sol=amarillo, lluvia=cian…)
+    # accent color per state (yellow sun, cyan rain, magenta storm)
     temp_pair = {'sun': COLOR_PAIR_SUN, 'rain': COLOR_PAIR_RAIN_NORMAL,
                  'storm': COLOR_PAIR_STORM_ACC}.get(kind, COLOR_PAIR_TEMP)
     attr = curses.color_pair(temp_pair) | curses.A_BOLD
@@ -671,7 +766,7 @@ def draw_temperature(stdscr, weather):
         except curses.error:
             pass
 
-    # línea extra: sensación · humedad · viento
+    # extra line: feels like · humidity · wind
     feels, humidity, wind = weather.get_extra()
     feels_word = "Sensación" if weather.lang.startswith('es') else "Feels like"
     bits = []
@@ -713,9 +808,9 @@ def setup_colors(rain_color_str='cyan', lightning_color_str='yellow'):
         # curses.init_pair(COLOR_PAIR_CLOUD, curses.COLOR_WHITE, bg) # Removed
         curses.init_pair(COLOR_PAIR_LIGHTNING, lightning_fg, bg)
         curses.init_pair(COLOR_PAIR_TEMP, curses.COLOR_WHITE, bg)  # fork: °C
-        curses.init_pair(COLOR_PAIR_SUN, curses.COLOR_YELLOW, bg)         # fork: sol
-        curses.init_pair(COLOR_PAIR_CLOUD, curses.COLOR_WHITE, bg)        # fork: nubes/niebla
-        curses.init_pair(COLOR_PAIR_STORM_ACC, curses.COLOR_MAGENTA, bg)  # fork: °C en tormenta
+        curses.init_pair(COLOR_PAIR_SUN, curses.COLOR_YELLOW, bg)         # fork: sun
+        curses.init_pair(COLOR_PAIR_CLOUD, curses.COLOR_WHITE, bg)        # fork: clouds/fog
+        curses.init_pair(COLOR_PAIR_STORM_ACC, curses.COLOR_MAGENTA, bg)  # fork: °C in storms
         LIGHTNING_COLOR_ATTR = curses.color_pair(COLOR_PAIR_LIGHTNING) | curses.A_BOLD
 
         return True
@@ -755,10 +850,10 @@ def simulate_rain(stdscr, rain_color_str='cyan', lightning_color_str='yellow', s
     if weather:
         weather.start()
 
-    # factor de lluvia según el clima real (sun=despejado … storm=diluvio)
+    # rain factor per real weather state (sun=dry … storm=downpour)
     RAIN_FACTOR = {'sun': 0.0, 'fog': 0.0, 'cloud': 0.25, 'rain': 1.0, 'storm': 1.4}
 
-    # fork: escenografía (posiciones dependen del tamaño → rehacer al redimensionar)
+    # fork: scenery (positions depend on the size → rebuild on resize)
     kind = 'rain'
     clouds = make_clouds(rows, cols)
     fog_bands = make_fog_bands(rows, cols)
@@ -802,7 +897,7 @@ def simulate_rain(stdscr, rain_color_str='cyan', lightning_color_str='yellow', s
         if sound_manager:
             sound_manager.update()
 
-        # fork: el clima real de Esparza manda sobre tormenta e intensidad
+        # fork: the real weather rules thunderstorm mode and rain intensity
         rain_factor = 1.0
         if weather:
             _, _, kind = weather.get()
@@ -851,7 +946,7 @@ def simulate_rain(stdscr, rain_color_str='cyan', lightning_color_str='yellow', s
         # --- Drawing --- #
         stdscr.clear()
 
-        # 0. fork: escenografía del estado (detrás de la lluvia y de los °C)
+        # 0. fork: weather-state scenery (behind the rain and the °C)
         if weather:
             if kind == 'sun':
                 draw_sun(stdscr, rows, cols)
@@ -880,7 +975,7 @@ def simulate_rain(stdscr, rain_color_str='cyan', lightning_color_str='yellow', s
              except curses.error:
                  pass
 
-        # 3. fork: temperatura grande de Esparza, por encima de la lluvia
+        # 3. fork: big temperature readout, above the rain
         if weather:
             draw_temperature(stdscr, weather)
 
@@ -934,13 +1029,14 @@ def main():
         '--location',
         type=str,
         default='',
-        help="Location for the real weather (wttr.in). Default: auto-detect by IP."
+        help="Place name for the real weather (Open-Meteo geocoding), e.g. "
+             "\"Esparza,Puntarenas,Costa Rica\". Default: auto-detect by IP."
     )
     parser.add_argument(
         '--lang',
         type=str,
         default='en',
-        help="Language for the weather condition text (wttr.in lang code). Default: en."
+        help="Language for the condition text: en or es. Default: en."
     )
     parser.add_argument(
         '--no-temp',
@@ -954,7 +1050,7 @@ def main():
         print("Error: This script requires a TTY with curses support.")
         return
 
-    # locale para que curses dibuje bien los glifos Unicode del °C (█ ▛▜ …)
+    # locale so curses renders the Unicode glyphs of the °C block (█ ▛▜ …)
     try:
         locale.setlocale(locale.LC_ALL, '')
     except locale.Error:

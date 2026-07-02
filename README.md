@@ -4,7 +4,7 @@
 
 ![All weather states](weather-states.gif)
 
-A tiny live weather panel for your terminal, built on top of [rmaake1's terminal-rain-lightning](https://github.com/rmaake1/terminal-rain-lightning). It polls [wttr.in](https://wttr.in) (no API key needed) every 10 minutes and the sky follows the actual forecast where you are:
+A tiny live weather panel for your terminal, built on top of [rmaake1's terminal-rain-lightning](https://github.com/rmaake1/terminal-rain-lightning). It polls [Open-Meteo](https://open-meteo.com) (no API key needed, 15-minute model data) every 10 minutes and the sky follows the actual weather where you are:
 
 | Real weather | What you see |
 |---|---|
@@ -38,8 +38,8 @@ terminal-rain --location "Esparza,Puntarenas,Costa Rica" --lang es
 
 ### Options
 
-*   `--location PLACE`: Location for the real weather (any wttr.in query). Default: auto-detect by IP.
-*   `--lang CODE`: Language for the condition text (wttr.in lang code). Default: `en`.
+*   `--location PLACE`: Place name, geocoded by Open-Meteo; extra comma-separated segments disambiguate (`"Esparza,Puntarenas,Costa Rica"`). Default: auto-detect by IP.
+*   `--lang {en,es}`: Language for the condition text. Default: `en`.
 *   `--rain-color COLOR` / `--lightning-color COLOR`: `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`. Defaults: `cyan` / `yellow`.
 *   `--speed {fast,medium,slow}`: Starting animation speed. Default: `fast`.
 *   `--sound` / `--volume {quiet,normal,loud}`: Rain and thunder sounds (needs `ffplay`).
@@ -70,7 +70,7 @@ Or install the upstream project directly: [rmaake1/terminal-rain-lightning](http
 ## Troubleshooting
 
 *   **Garbled output / colors off**: use a modern terminal with 256-color support and `TERM=xterm-256color` (kitty and Alacritty work great).
-*   **No temperature, only rain**: wttr.in unreachable or rate-limited; the panel keeps animating and retries every 10 minutes.
+*   **No temperature, only rain**: Open-Meteo (or the IP geolocation) unreachable; the panel keeps animating and retries every 10 minutes.
 *   **No sound**: install FFmpeg so `ffplay` is on your PATH, then `--sound` or press `m`.
 
 ## Credit and license
