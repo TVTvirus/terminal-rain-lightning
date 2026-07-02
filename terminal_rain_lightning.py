@@ -414,6 +414,130 @@ BIG_FONT = {
 }
 DEGREE = ["▛▜", "▙▟", "  ", "  ", "  "]
 
+# --- fork: escenografía por estado (sol / nubes / niebla) ---
+COLOR_PAIR_SUN = 6
+COLOR_PAIR_CLOUD = 7
+COLOR_PAIR_STORM_ACC = 8
+
+SUN_FRAMES = [
+    [
+        "   \\   |   /   ",
+        "     ▗███▖     ",
+        "  ─  █████  ─  ",
+        "     ▝███▘     ",
+        "   /   |   \\   ",
+    ],
+    [
+        "  \\    |    /  ",
+        "     ▗███▖     ",
+        " ─   █████   ─ ",
+        "     ▝███▘     ",
+        "  /    |    \\  ",
+    ],
+]
+
+CLOUD_SHAPES = [
+    ["  ▄▟█████▙▄  ", "▟███████████▙"],
+    [" ▄████▄ ", "▟██████▙"],
+    ["   ▄██▄▄▄   ", " ▟████████▙ "],
+]
+
+
+def draw_sun(stdscr, rows, cols):
+    """Sol con rayos que pulsan, arriba a la izquierda (no pisa los °C)."""
+    frame = SUN_FRAMES[int(time.time() * 1.6) % len(SUN_FRAMES)]
+    sy = max(1, rows // 5 - 1)
+    sx = max(1, cols // 5 - len(frame[0]) // 2)
+    attr = curses.color_pair(COLOR_PAIR_SUN) | curses.A_BOLD
+    for i, line in enumerate(frame):
+        y = sy + i
+        if 0 <= y < rows:
+            try:
+                stdscr.addstr(y, sx, line[:max(0, cols - sx - 1)], attr)
+            except curses.error:
+                pass
+
+
+def make_clouds(rows, cols):
+    """3 nubes a alturas y velocidades distintas (parallax). La posición se
+    deriva del reloj → no hay estado que actualizar frame a frame."""
+    # dos arriba y una abajo del bloque de °C (si pasa por detrás, los huecos
+    # del glifo la trocean y parece un dígito roto)
+    ys = [1, max(3, rows // 4), max(7, (rows * 3) // 4 + 2)]
+    speeds = [3.2, 1.6, 2.3]  # columnas/seg, misma dirección = viento
+    clouds = []
+    for i in range(3):
+        clouds.append({
+            'shape': CLOUD_SHAPES[i % len(CLOUD_SHAPES)],
+            'y': ys[i],
+            'speed': speeds[i],
+            'x0': random.uniform(0, max(1, cols)),
+            'dim': i != 0,
+        })
+    return clouds
+
+
+def draw_clouds(stdscr, clouds, rows, cols):
+    t = time.time()
+    for cloud in clouds:
+        w = len(cloud['shape'][0])
+        span = cols + w
+        x = int((cloud['x0'] + t * cloud['speed']) % span) - w
+        attr = curses.color_pair(COLOR_PAIR_CLOUD)
+        if cloud['dim']:
+            attr |= curses.A_DIM
+        for i, line in enumerate(cloud['shape']):
+            y = cloud['y'] + i
+            if not (0 <= y < rows):
+                continue
+            start = max(0, -x)                 # recorte al entrar por la izquierda
+            end = min(len(line), cols - 1 - x)  # y al salir por la derecha
+            if start >= end:
+                continue
+            try:
+                stdscr.addstr(y, x + start, line[start:end], attr)
+            except curses.error:
+                pass
+
+
+def make_fog_bands(rows, cols):
+    """Bandas de niebla: patrón grumoso precalculado (paseo aleatorio de
+    densidad) que luego solo se desplaza; cada banda con rumbo y ritmo propios."""
+    bands = []
+    length = max(160, cols * 2)
+    for y in range(2, max(3, rows - 2), 3):
+        level = random.randint(0, 4)
+        pattern = []
+        for _ in range(length):
+            level = max(0, min(5, level + random.choice((-1, 0, 1))))
+            pattern.append(' ' if level <= 1 else ('░' if level <= 3 else '▒'))
+        bands.append({
+            'y': y,
+            'pattern': ''.join(pattern),
+            'speed': random.uniform(2.0, 7.0) * random.choice((-1, 1)),
+            'dim': random.random() < 0.7,
+        })
+    return bands
+
+
+def draw_fog(stdscr, bands, rows, cols):
+    t = time.time()
+    for band in bands:
+        if band['y'] >= rows:
+            continue
+        pattern = band['pattern']
+        offset = int(t * band['speed']) % len(pattern)
+        line = pattern[offset:] + pattern[:offset]
+        if len(line) < cols:
+            line = line * (cols // len(line) + 1)
+        attr = curses.color_pair(COLOR_PAIR_CLOUD)
+        if band['dim']:
+            attr |= curses.A_DIM
+        try:
+            stdscr.addstr(band['y'], 0, line[:max(0, cols - 1)], attr)
+        except curses.error:
+            pass
+
 
 def build_temp_block(temp_str):
     """5 líneas con la temperatura en grande + símbolo de grados + C."""
@@ -437,19 +561,23 @@ class Weather:
         ('storm', ('thunder', 'storm', 'tormenta', 'eléctric', 'truen')),
         ('rain',  ('rain', 'drizzle', 'shower', 'sleet', 'snow',
                    'lluvia', 'llovizna', 'aguacero', 'chubasc', 'chaparr', 'nieve', 'aguaniev')),
-        ('cloud', ('cloud', 'overcast', 'fog', 'mist', 'haze',
-                   'nub', 'cubierto', 'niebla', 'neblina', 'bruma')),
+        ('fog',   ('fog', 'mist', 'haze', 'niebla', 'neblina', 'bruma', 'calima')),
+        ('cloud', ('cloud', 'overcast', 'nub', 'cubierto')),
         ('sun',   ('sun', 'clear', 'sol', 'despejado', 'claro')),
     ]
 
-    def __init__(self, location):
+    def __init__(self, location, lang='en'):
         self.location = location
+        self.lang = lang
         self.temp = None
         self.cond = "…"
         self.kind = "rain"
         self.feels = None
         self.humidity = ""
         self.wind = ""
+        # etiqueta del lugar: si el usuario dio ubicación, su primer tramo;
+        # si no, se rellena con el %l que detecta wttr.in por IP
+        self.place = location.split(',')[0].strip() if location else ""
         self.lock = threading.Lock()
 
     def start(self):
@@ -467,15 +595,16 @@ class Weather:
             self._set(env_t, os.environ.get('OJO_CLIMA_COND', 'prueba'))
             return
         try:
+            # sin ubicación, wttr.in auto-detecta por IP; %l = lugar resuelto
             url = ("https://wttr.in/" + urllib.parse.quote(self.location) +
-                   "?format=%t|%C|%f|%h|%w&lang=es")
+                   "?format=%t|%C|%f|%h|%w|%l&lang=" + urllib.parse.quote(self.lang))
             req = urllib.request.Request(url, headers={'User-Agent': 'curl/8.0'})
             raw = urllib.request.urlopen(req, timeout=6).read().decode('utf-8', 'ignore').strip()
-            if '|' in raw and len(raw) < 200:
+            if '|' in raw and len(raw) < 300:
                 parts = [p.strip() for p in raw.split('|')]
-                while len(parts) < 5:
+                while len(parts) < 6:
                     parts.append('')
-                self._set(parts[0], parts[1], parts[2], parts[3], parts[4])
+                self._set(parts[0], parts[1], parts[2], parts[3], parts[4], parts[5])
         except Exception:
             pass
 
@@ -483,7 +612,7 @@ class Weather:
     def _num(s):
         return ''.join(ch for ch in s if ch.isdigit() or ch == '-')
 
-    def _set(self, temp_raw, cond, feels='', humidity='', wind=''):
+    def _set(self, temp_raw, cond, feels='', humidity='', wind='', place=''):
         cl = cond.lower()
         kind = 'cloud'
         for k, words in self.KEYWORDS:
@@ -497,6 +626,8 @@ class Weather:
             self.humidity = humidity
             self.wind = wind
             self.kind = kind
+            if not self.place and place:
+                self.place = place.split(',')[0].strip()
 
     def get(self):
         with self.lock:
@@ -506,16 +637,23 @@ class Weather:
         with self.lock:
             return self.feels, self.humidity, self.wind
 
+    def get_place(self):
+        with self.lock:
+            return self.place
+
 
 def draw_temperature(stdscr, weather):
     """Dibuja los °C grandes + etiqueta, centrados y por encima de la lluvia."""
-    temp, cond, _ = weather.get()
+    temp, cond, kind = weather.get()
     rows, cols = stdscr.getmaxyx()
     block = build_temp_block(temp if temp else "--")
     width = max(len(line) for line in block)
     start_y = max(0, rows // 2 - 3)
     start_x = max(0, (cols - width) // 2)
-    attr = curses.color_pair(COLOR_PAIR_TEMP) | curses.A_BOLD
+    # acento por estado (como el fallback bash: sol=amarillo, lluvia=cian…)
+    temp_pair = {'sun': COLOR_PAIR_SUN, 'rain': COLOR_PAIR_RAIN_NORMAL,
+                 'storm': COLOR_PAIR_STORM_ACC}.get(kind, COLOR_PAIR_TEMP)
+    attr = curses.color_pair(temp_pair) | curses.A_BOLD
     for i, line in enumerate(block):
         y = start_y + i
         if 0 <= y < rows:
@@ -523,7 +661,8 @@ def draw_temperature(stdscr, weather):
                 stdscr.addstr(y, start_x, line[:max(0, cols - start_x - 1)], attr)
             except curses.error:
                 pass
-    label = "Esparza · " + (cond or "")
+    place = weather.get_place()
+    label = (place + " · " + cond) if place and cond else (place or cond or "")
     ly, lx = start_y + 6, max(0, (cols - len(label)) // 2)
     if 0 <= ly < rows:
         try:
@@ -534,9 +673,10 @@ def draw_temperature(stdscr, weather):
 
     # línea extra: sensación · humedad · viento
     feels, humidity, wind = weather.get_extra()
+    feels_word = "Sensación" if weather.lang.startswith('es') else "Feels like"
     bits = []
     if feels:
-        bits.append("Sensación " + feels + "°")
+        bits.append(feels_word + " " + feels + "°")
     if humidity:
         bits.append("Hum " + humidity)
     if wind:
@@ -573,6 +713,9 @@ def setup_colors(rain_color_str='cyan', lightning_color_str='yellow'):
         # curses.init_pair(COLOR_PAIR_CLOUD, curses.COLOR_WHITE, bg) # Removed
         curses.init_pair(COLOR_PAIR_LIGHTNING, lightning_fg, bg)
         curses.init_pair(COLOR_PAIR_TEMP, curses.COLOR_WHITE, bg)  # fork: °C
+        curses.init_pair(COLOR_PAIR_SUN, curses.COLOR_YELLOW, bg)         # fork: sol
+        curses.init_pair(COLOR_PAIR_CLOUD, curses.COLOR_WHITE, bg)        # fork: nubes/niebla
+        curses.init_pair(COLOR_PAIR_STORM_ACC, curses.COLOR_MAGENTA, bg)  # fork: °C en tormenta
         LIGHTNING_COLOR_ATTR = curses.color_pair(COLOR_PAIR_LIGHTNING) | curses.A_BOLD
 
         return True
@@ -589,6 +732,9 @@ def setup_colors(rain_color_str='cyan', lightning_color_str='yellow'):
         # curses.init_pair(COLOR_PAIR_CLOUD, curses.COLOR_WHITE, curses.COLOR_BLACK) # Removed
         curses.init_pair(COLOR_PAIR_LIGHTNING, curses.COLOR_WHITE, curses.COLOR_BLACK)
         curses.init_pair(COLOR_PAIR_TEMP, curses.COLOR_WHITE, curses.COLOR_BLACK)  # fork: °C
+        curses.init_pair(COLOR_PAIR_SUN, curses.COLOR_WHITE, curses.COLOR_BLACK)        # fork
+        curses.init_pair(COLOR_PAIR_CLOUD, curses.COLOR_WHITE, curses.COLOR_BLACK)      # fork
+        curses.init_pair(COLOR_PAIR_STORM_ACC, curses.COLOR_WHITE, curses.COLOR_BLACK)  # fork
         LIGHTNING_COLOR_ATTR = curses.color_pair(COLOR_PAIR_LIGHTNING) | curses.A_BOLD
         return False
 
@@ -610,7 +756,12 @@ def simulate_rain(stdscr, rain_color_str='cyan', lightning_color_str='yellow', s
         weather.start()
 
     # factor de lluvia según el clima real (sun=despejado … storm=diluvio)
-    RAIN_FACTOR = {'sun': 0.0, 'cloud': 0.25, 'rain': 1.0, 'storm': 1.4}
+    RAIN_FACTOR = {'sun': 0.0, 'fog': 0.0, 'cloud': 0.25, 'rain': 1.0, 'storm': 1.4}
+
+    # fork: escenografía (posiciones dependen del tamaño → rehacer al redimensionar)
+    kind = 'rain'
+    clouds = make_clouds(rows, cols)
+    fog_bands = make_fog_bands(rows, cols)
 
     last_update_time = time.time()
 
@@ -622,6 +773,8 @@ def simulate_rain(stdscr, rain_color_str='cyan', lightning_color_str='yellow', s
              stdscr.clear()
              raindrops.clear()
              active_bolts.clear()
+             clouds = make_clouds(rows, cols)
+             fog_bands = make_fog_bands(rows, cols)
         elif key == ord('q') or key == ord('Q') or key == 27:
             break
         elif key == ord('t') or key == ord('T'):
@@ -698,6 +851,15 @@ def simulate_rain(stdscr, rain_color_str='cyan', lightning_color_str='yellow', s
         # --- Drawing --- #
         stdscr.clear()
 
+        # 0. fork: escenografía del estado (detrás de la lluvia y de los °C)
+        if weather:
+            if kind == 'sun':
+                draw_sun(stdscr, rows, cols)
+            elif kind == 'cloud':
+                draw_clouds(stdscr, clouds, rows, cols)
+            elif kind == 'fog':
+                draw_fog(stdscr, fog_bands, rows, cols)
+
         # 1. Lightning
         for bolt in active_bolts:
              bolt.draw(stdscr)
@@ -771,13 +933,19 @@ def main():
     parser.add_argument(
         '--location',
         type=str,
-        default='Esparza,Puntarenas,Costa Rica',
-        help="Ubicación para el clima real (wttr.in). Default: Esparza, Costa Rica."
+        default='',
+        help="Location for the real weather (wttr.in). Default: auto-detect by IP."
+    )
+    parser.add_argument(
+        '--lang',
+        type=str,
+        default='en',
+        help="Language for the weather condition text (wttr.in lang code). Default: en."
     )
     parser.add_argument(
         '--no-temp',
         action='store_true',
-        help="No mostrar la temperatura (lluvia decorativa pura)."
+        help="Hide the temperature / disable weather sync (pure decorative rain)."
     )
     args = parser.parse_args()
     # ------------------------ #
@@ -794,7 +962,7 @@ def main():
 
     sound_manager = SoundManager(enabled=args.sound, volume_preset=args.volume)
     atexit.register(sound_manager.close)
-    weather = None if args.no_temp else Weather(args.location)
+    weather = None if args.no_temp else Weather(args.location, args.lang)
 
     try:
         # Pass parsed colors to the main simulation function
