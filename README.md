@@ -1,229 +1,78 @@
-# Terminal Rain
-
-A Python script that creates a mesmerizing rain and lightning animation directly in your terminal using the `curses` library.
-
-## This fork: it syncs with the real weather
+# Terminal Rain, synced with the real weather
 
 > *"Imagine it synced with real weather"* said a comment under the original reddit post. Well, here it is.
 
 ![All weather states](weather-states.gif)
 
-This fork turns the animation into a tiny live weather panel:
+A tiny live weather panel for your terminal, built on top of [rmaake1's terminal-rain-lightning](https://github.com/rmaake1/terminal-rain-lightning). It polls [wttr.in](https://wttr.in) (no API key needed) every 10 minutes and the sky follows the actual forecast where you are:
 
-*   **Real weather sync**: polls [wttr.in](https://wttr.in) (no API key) every 10 minutes in a background thread. Your location is auto-detected by IP, or pin one with `--location "Esparza,Puntarenas,Costa Rica"`.
-*   **The sky follows the forecast**: clear skies show a pulsing sun, overcast drifts parallax clouds across the screen, fog rolls in as shifting banks of `░▒`, rain falls harder or softer with the real intensity, and actual thunderstorms turn on the lightning by themselves.
-*   **Big temperature readout**: current °C drawn in a chunky block font in the center, colored by the weather (yellow sun, cyan rain, magenta storm), with a "feels like · humidity · wind" line under it.
-*   `--lang es` (or any wttr.in lang code) for the condition text; `--no-temp` gives you back the original pure decorative rain.
-*   Force a state to preview it (no network needed): `OJO_CLIMA_TEMP=25 OJO_CLIMA_COND=storm terminal-rain` (the env names come from [my terminal dashboard](https://github.com/TVTvirus), where this panel lives).
+| Real weather | What you see |
+|---|---|
+| Clear / sunny | A sun with pulsing rays |
+| Cloudy / overcast | Clouds drifting across the screen with parallax, light drizzle |
+| Fog / mist | Rolling banks of `░▒` shifting at different speeds |
+| Rain | The classic rain, intensity matching the forecast |
+| Thunderstorm | Heavy rain and the lightning turns on by itself |
 
-Install straight from this fork:
+On top of the scene, the current temperature is drawn in a chunky block font, colored by the weather (yellow sun, cyan rain, magenta storm), with the location, condition and a "feels like · humidity · wind" line under it.
+
+## Install
 
 ```bash
 pipx install git+https://github.com/TVTvirus/terminal-rain-lightning.git
 ```
 
-Everything below this line is the original project by [rmaake1](https://github.com/rmaake1/terminal-rain-lightning), which does all the heavy lifting. All the rain and lightning magic is theirs.
-
----
-
-## Calm Rain
-![Calm Rain](calmrain.gif)
-
-## Thunderstorm
-![Thunderstorm](thunderstorm.gif)
-
-## Disclaimer
-
-I'm a hobby coder and write most of my scripts with Cursor's help, apologies if anything is broken or especially wonky in the source code.
-
-I'm relatively new to Linux and wanted to make something like this for fun after seeing some of the other projects like bash-pipes, asciiquarium, etc.
-
-## Features
-
-*   Smooth ASCII rain effect with varying drop characters.
-*   Toggleable "Thunderstorm" mode for more intense rain and lightning.
-*   Optional startup flag for launching directly into thunderstorm mode.
-*   Fast, medium, and slow animation speed modes.
-*   Optional rain and varied thunder sounds.
-*   Customizable rain and lightning colors via command-line arguments.
-*   Responsive to terminal resizing (clears and redraws).
-*   Lightweight and runs in most modern terminals.
-
-## Requirements
-
-*   Python 3.6+
-*   A terminal that supports `curses` and color attributes (most modern terminals)
-*   Optional: `ffplay` from FFmpeg for sound playback
-
-## Installation
-
-### Using `pipx`
-
-`pipx` installs Python command-line applications into isolated environments and makes them globally available without polluting your global Python installation or requiring manual virtual environment activation to run.
-
-Install `pipx` first if you do not already have it:
-
-The best way to install `pipx` on Linux is through your distribution's package manager, if available. This ensures proper system integration and updates.
-
-Common distro installs pulled from the [pipx repo](https://github.com/pypa/pipx):
-
-Ubuntu 23.04 or above:
-
-```bash
-sudo apt update
-sudo apt install pipx
-pipx ensurepath
-sudo pipx ensurepath --global # optional to allow pipx actions with --global argument
-```
-
-Fedora:
-
-```bash
-sudo dnf install pipx
-pipx ensurepath
-sudo pipx ensurepath --global # optional to allow pipx actions with --global argument
-```
-
-Arch:
-
-```bash
-sudo pacman -S python-pipx
-pipx ensurepath
-sudo pipx ensurepath --global # optional to allow pipx actions with --global argument
-```
-
-Using `pip` on other distributions:
-
-```bash
-python3 -m pip install --user pipx
-python3 -m pipx ensurepath
-sudo pipx ensurepath --global # optional to allow pipx actions with --global argument
-```
-
-Then install `terminal-rain-lightning` from GitHub:
-
-```bash
-pipx install git+https://github.com/rmaake1/terminal-rain-lightning.git
-```
-
-Or install it from a local clone:
-
-```bash
-git clone https://github.com/rmaake1/terminal-rain-lightning.git
-cd terminal-rain-lightning
-pipx install .
-```
-
-### Using the Arch AUR
-
-On Arch-based systems with an AUR helper:
-
-```bash
-yay -S terminal-rain-lightning
-```
-
-Note: I do not maintain the AUR package, so it may lag behind the latest changes in this repository.
-
-### Using Nix
-
-From inside a local clone:
-
-```bash
-nix-build
-./result/bin/terminal-rain
-```
-
-## Updating
-
-If you installed from GitHub with `pipx`:
-
-```bash
-pipx upgrade terminal-rain-lightning
-```
-
-If you installed from a local clone:
-
-```bash
-cd terminal-rain-lightning
-git pull
-pipx install --force .
-```
-
-If you installed from the Arch AUR, update it through your AUR helper:
-
-```bash
-yay -Syu terminal-rain-lightning
-```
-
-The AUR package is community-maintained and may not always match the latest repository version.
+Requirements: Python 3.6+, a terminal with `curses` and color support (kitty, Alacritty, etc.). Optional: `ffplay` from FFmpeg for rain/thunder sounds.
 
 ## Usage
-
-Once installed:
 
 ```bash
 terminal-rain
 ```
 
-### Controls
-
-*   `t` or `T`: Toggle thunderstorm mode on/off.
-*   `s` or `S`: Cycle animation speed: fast, medium, slow.
-*   `m` or `M`: Toggle sound on/off.
-*   `v` or `V`: Cycle sound volume: quiet, normal, loud.
-*   `q` or `Q` or `Esc`: Quit the animation.
-*   `Ctrl+C`: Also quits the animation.
-*   The animation will adapt if you resize your terminal window.
-
-### Command-line Options
+That's it. Your location is auto-detected by IP. To pin one:
 
 ```bash
-terminal-rain [OPTIONS]
+terminal-rain --location "Esparza,Puntarenas,Costa Rica" --lang es
 ```
 
-*   `--rain-color COLOR`: Set the color for the rain. Default: `cyan`.
-*   `--lightning-color COLOR`: Set the color for the lightning. Default: `yellow`.
-*   `-t`, `--thunder`: Start in thunderstorm mode.
-*   `--speed {fast,medium,slow}`: Set the starting animation speed. Default: `fast`.
-*   `--sound`: Enable rain and thunder sounds. Requires `ffplay` from FFmpeg.
-*   `--volume {quiet,normal,loud}`: Set the rain and thunder volume preset. Default: `normal`.
-*   `--help`: Show help text and exit.
+### Options
 
-Available color choices: `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`.
+*   `--location PLACE`: Location for the real weather (any wttr.in query). Default: auto-detect by IP.
+*   `--lang CODE`: Language for the condition text (wttr.in lang code). Default: `en`.
+*   `--rain-color COLOR` / `--lightning-color COLOR`: `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`. Defaults: `cyan` / `yellow`.
+*   `--speed {fast,medium,slow}`: Starting animation speed. Default: `fast`.
+*   `--sound` / `--volume {quiet,normal,loud}`: Rain and thunder sounds (needs `ffplay`).
+*   `--no-temp`: Turn the weather sync off, original decorative rain (see below).
 
-Examples:
+### Keys
+
+*   `s`: cycle animation speed · `m`: toggle sound · `v`: cycle volume · `q` / `Esc` / `Ctrl+C`: quit.
+*   `t` (thunderstorm toggle) only works in `--no-temp` mode: with the sync on, the *real* weather decides when there's a storm. That's the whole point.
+
+### Preview any state (no network needed)
 
 ```bash
-terminal-rain --rain-color blue --lightning-color white
+OJO_CLIMA_TEMP=25 OJO_CLIMA_COND=thunderstorm terminal-rain
 ```
 
-```bash
-terminal-rain --thunder --sound
-```
+Conditions can be in English or Spanish (`sunny`, `cloudy`, `fog`, `rain`, `thunderstorm`, ...). The env names come from my terminal dashboard, where this panel lives.
 
-```bash
-terminal-rain --thunder --sound --speed medium --volume loud
-```
+## Just want the original rain?
+
+`terminal-rain --no-temp` gives you the original animation untouched: pure decorative rain, no network, no temperature, and the `t` key toggles thunderstorm mode manually.
+
+![Calm Rain](calmrain.gif)
+![Thunderstorm](thunderstorm.gif)
+
+Or install the upstream project directly: [rmaake1/terminal-rain-lightning](https://github.com/rmaake1/terminal-rain-lightning).
 
 ## Troubleshooting
 
-### `curses.error`, Garbled Output, or Colors Not Working
+*   **Garbled output / colors off**: use a modern terminal with 256-color support and `TERM=xterm-256color` (kitty and Alacritty work great).
+*   **No temperature, only rain**: wttr.in unreachable or rate-limited; the panel keeps animating and retries every 10 minutes.
+*   **No sound**: install FFmpeg so `ffplay` is on your PATH, then `--sound` or press `m`.
 
-* Ensure your terminal emulator fully supports curses, 256 colors, and attributes like bold/dim. Modern terminals like Alacritty or Kitty generally work well.
-* Check your `TERM` environment variable. Values like `xterm-256color` are good.
-* The script attempts to use default terminal colors if color changing isn't supported, but full support provides the best experience.
+## Credit and license
 
-### Sound Not Working
-
-* Install FFmpeg so `ffplay` is available on your PATH.
-* Sound is opt-in. Start with `terminal-rain --sound` or press `m` while the animation is running.
-
-## License
-
-Distributed under the MIT License. See LICENSE file for more information. Do whatever you want with this script.
-
-## Acknowledgements
-
-Inspired by classic terminal screensavers and effects, asciiquarium, bash-pipes, etc.
-
-Built with Python and the curses library.
+All the rain and lightning magic is [rmaake1](https://github.com/rmaake1)'s work: this fork just taught it to look out the window. MIT License, same as upstream. See the LICENSE file.
