@@ -2,6 +2,28 @@
 
 A Python script that creates a mesmerizing rain and lightning animation directly in your terminal using the `curses` library.
 
+## This fork: it syncs with the real weather
+
+> *"Imagine it synced with real weather"* said a comment under the original reddit post. Well, here it is.
+
+This fork turns the animation into a tiny live weather panel:
+
+*   **Real weather sync**: polls [wttr.in](https://wttr.in) (no API key) every 10 minutes in a background thread. Your location is auto-detected by IP, or pin one with `--location "Esparza,Puntarenas,Costa Rica"`.
+*   **The sky follows the forecast**: clear skies show a pulsing sun, overcast drifts parallax clouds across the screen, fog rolls in as shifting banks of `░▒`, rain falls harder or softer with the real intensity, and actual thunderstorms turn on the lightning by themselves.
+*   **Big temperature readout**: current °C drawn in a chunky block font in the center, colored by the weather (yellow sun, cyan rain, magenta storm), with a "feels like · humidity · wind" line under it.
+*   `--lang es` (or any wttr.in lang code) for the condition text; `--no-temp` gives you back the original pure decorative rain.
+*   Force a state to preview it (no network needed): `OJO_CLIMA_TEMP=25 OJO_CLIMA_COND=storm terminal-rain` (the env names come from [my terminal dashboard](https://github.com/TVTvirus), where this panel lives).
+
+Install straight from this fork:
+
+```bash
+pipx install git+https://github.com/TVTvirus/terminal-rain-lightning.git
+```
+
+Everything below this line is the original project by [rmaake1](https://github.com/rmaake1/terminal-rain-lightning), which does all the heavy lifting. All the rain and lightning magic is theirs.
+
+---
+
 ## Calm Rain
 ![Calm Rain](calmrain.gif)
 
