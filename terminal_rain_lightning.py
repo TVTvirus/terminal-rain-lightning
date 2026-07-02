@@ -561,7 +561,8 @@ class Weather:
     Open-Meteo backend (formerly wttr.in): no API key, 15-minute model step,
     and none of wttr's ~1h caching that kept reporting "Sunny" during a downpour.
     Needs lat/lon, resolved once via geocoding (if --location is given) or by
-    IP (ipapi.co). The state comes from the WMO weather code, not text parsing."""
+    IP (ipapi.co). The state is derived from cloud cover + precipitation
+    (see _classify), with the WMO weather code as a tiebreaker."""
 
     # WMO code → (state, english text, spanish text)
     WMO = {
@@ -673,6 +674,36 @@ class Weather:
         except Exception:
             pass
 
+    @classmethod
+    def _classify(cls, cur):
+        """State from the numbers, station-style, instead of the raw WMO code.
+
+        Pure model codes over-dramatize convection (a 3-minute tropical sprinkle
+        shows up as 'thunderstorm with hail' for an hour). Blended providers like
+        Google/weather.com stay on 'cloudy' unless real millimeters fall, so:
+        cloud cover decides sun/cloud, and rain/storm need sustained precip
+        (mm per 15-minute step: 2.0 ≈ 8 mm/h rain, 3.5 ≈ 14 mm/h downpour)."""
+        code = int(cur.get('weather_code', 3))
+        precip = float(cur.get('precipitation') or 0)
+        clouds = float(cur.get('cloud_cover', 50) if cur.get('cloud_cover') is not None else 50)
+        if code in (45, 48):
+            return 'fog', 'Fog', 'Niebla'
+        if code >= 95 and precip >= 3.5:
+            _, en, es = cls.WMO.get(code, ('storm', 'Thunderstorm', 'Tormenta'))
+            return 'storm', en, es
+        if precip >= 2.0:
+            if code >= 95:  # storm code downgraded: call it what it looks like
+                return 'rain', 'Heavy rain', 'Lluvia fuerte'
+            _, en, es = cls.WMO.get(code, ('rain', 'Rain', 'Lluvia'))
+            return 'rain', en, es
+        if clouds <= 15:
+            return 'sun', 'Clear', 'Despejado'
+        if clouds <= 40:
+            return 'sun', 'Mainly clear', 'Mayormente despejado'
+        if clouds <= 75:
+            return 'cloud', 'Partly cloudy', 'Parcialmente nublado'
+        return 'cloud', 'Cloudy', 'Nublado'
+
     def _fetch(self):
         # test/offline mode: OJO_CLIMA_TEMP / OJO_CLIMA_COND
         env_t = os.environ.get('OJO_CLIMA_TEMP')
@@ -686,11 +717,10 @@ class Weather:
         try:
             url = ("https://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s"
                    "&current=temperature_2m,apparent_temperature,relative_humidity_2m,"
-                   "wind_speed_10m,wind_direction_10m,weather_code&timezone=auto"
-                   % (self.lat, self.lon))
+                   "wind_speed_10m,wind_direction_10m,weather_code,precipitation,"
+                   "cloud_cover&timezone=auto" % (self.lat, self.lon))
             cur = self._get_json(url)['current']
-            kind, cond_en, cond_es = self.WMO.get(int(cur['weather_code']),
-                                                  ('cloud', 'Cloudy', 'Nublado'))
+            kind, cond_en, cond_es = self._classify(cur)
             # wind_direction_10m is where the wind comes FROM; the arrow points TO
             blowing_to = (float(cur.get('wind_direction_10m', 0)) + 180) % 360
             arrow = self.ARROWS[int((blowing_to + 22.5) // 45) % 8]
