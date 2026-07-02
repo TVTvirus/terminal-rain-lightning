@@ -590,9 +590,12 @@ class Weather:
         82: ('rain', 'Heavy showers', 'Chubascos fuertes'),
         85: ('rain', 'Snow showers', 'Chubascos de nieve'),
         86: ('rain', 'Snow showers', 'Chubascos de nieve'),
+        # 96/99 are officially "with hail", but Open-Meteo notes the hail
+        # detail is only reliable in Central Europe; in the tropics it shows
+        # up for any strong convection, so we keep the label plain
         95: ('storm', 'Thunderstorm', 'Tormenta'),
-        96: ('storm', 'Thunderstorm with hail', 'Tormenta con granizo'),
-        99: ('storm', 'Thunderstorm with hail', 'Tormenta con granizo'),
+        96: ('storm', 'Heavy thunderstorm', 'Tormenta fuerte'),
+        99: ('storm', 'Heavy thunderstorm', 'Tormenta fuerte'),
     }
     ARROWS = "↑↗→↘↓↙←↖"  # where the wind blows TO (N, NE, …)
 
