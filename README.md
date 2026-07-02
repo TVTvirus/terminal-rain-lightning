@@ -6,6 +6,8 @@ A Python script that creates a mesmerizing rain and lightning animation directly
 
 > *"Imagine it synced with real weather"* said a comment under the original reddit post. Well, here it is.
 
+![All weather states](weather-states.gif)
+
 This fork turns the animation into a tiny live weather panel:
 
 *   **Real weather sync**: polls [wttr.in](https://wttr.in) (no API key) every 10 minutes in a background thread. Your location is auto-detected by IP, or pin one with `--location "Esparza,Puntarenas,Costa Rica"`.
